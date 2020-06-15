@@ -1,0 +1,203 @@
+---
+title: "PCA"
+author: "Ana"
+date: "14/6/2020"
+output:
+  word_document: default
+  html_document: default
+---
+1.PCA with FactoMineR function
+```{r}
+library(dplyr)
+library (ggplot2)
+library(FactoMineR)
+
+final_data <- read.csv("C:/Users/Ana/Desktop/final_data.csv")
+sapply(final_data, class)
+#remove factor and responsive vble
+fd_for_pca <- select(final_data, 
+                     -countries_en, 
+                     -nutriscore_grade,
+                     -pnns_groups_2,
+                     -nutriscore_score)
+
+head(final_data, n=9)
+#data for PCA 36556 - 8 vbles
+
+
+#PCA con funcion
+pca_final_data <- prcomp(fd_for_pca, center = TRUE, scale. = TRUE)
+summary(pca_final_data)
+biplot(pca_final_data, choices=1:2)
+library(factoextra)
+fviz_pca_var(pca_final_data,
+             col.var = "contrib", 
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     
+             )
+#compute standard deviation for each component
+standard_deviation <- pca_final_data$sdev
+#compute variance
+var <- standard_deviation^2
+#variance of 4 first PCA
+var[1:6]
+#proportion of variance explained
+prop_varex <- var/sum(var)
+prop_varex[1:8]
+plot(prop_varex, xlab = "Principal Component",
+             ylab = "Proportion of Variance Explained",
+             type = "b")
+
+
+library(corrplot)
+var <- get_pca_var(pca_final_data)
+corrplot(var$cos2, is.corr=FALSE)
+fviz_cos2(pca_final_data, choice = "var", axes = 1:2)
+
+```
+according to last elbow rule, the first 4 PCA are significant, retaining a total of 73% of inertia
+
+The most well represented feature is carbohydrates along sugas as these two are usually representative as the same nutrient in foods. 
+
+
+the least represented dimension is salt, as the value registered in the dataset corresponds to a 100g ration of the product, and the retio of this ingredient in that amount of food is usually not representative.
+
+
+2.PCA function with categorial dimensions as sumplementary
+```{r}
+#PCA con factors as supplementary to plot in same factorial plane
+fd1 <- select(final_data,-nutriscore_score)
+pca1 <- PCA(fd1,quali.sup=c(1,3,5)) 
+
+fviz_pca_biplot(pca1, label = "var", habillage=fd1$nutriscore_grade)
+
+#fviz_pca_biplot(pca1, label = "var", habillage=fd1$countries_en)
+
+```
+high nutrition score grades are mostly foods with high protein values
+
+
+3. PCA buil function with weights
+```{r}
+#PCA con pesos 
+
+library(magrittr)
+library(ggpubr)
+
+X <- as.matrix(fd_for_pca)
+n <- nrow(X); varnames <- colnames(X)
+p <- ncol(X); indnames <- rownames(X)
+
+n <- nrow(X); varnames <- colnames(X)
+p <- ncol(X); indnames <- rownames(X)
+
+custom_PCA <- function(X, weights, metric="eucl", graph=FALSE) {
+    N <- diag(x=weights*1/sum(weights), nrow=n, ncol=n)
+    G <- apply(N %*% X, 2, function(var) sum(var))
+    Xcent <- sweep(X,2,G)
+    if (metric == "eucl") {
+      cov <- t(Xcent) %*% N %*% Xcent
+      eigen <- eigen(cov); X <- Xcent
+    } else {
+      s <- apply(X, 2, function(var) sd(var[weights == 1]))
+      S <- diag(x=1/s, nrow=p, ncol=p)
+      Xstan <- Xcent %*% S
+      cor <- t(Xstan) %*% N %*% Xstan
+      eigen <- eigen(cor); X <- Xstan
+    }
+    
+    eigenvalues <- eigen$values
+    eigenvectors <- eigen$vectors
+    kaiser.rule.lim <- mean(eigenvalues)
+    sign.comp <- which(eigenvalues > kaiser.rule.lim)
+    ret.info <- sum(eigenvalues[sign.comp])/sum(eigenvalues)
+    print(paste0(length(sign.comp)," significant components (", round(ret.info*100,digits=2), "%)"))
+    proj.ind <- X %*% eigenvectors[,sign.comp]
+    proj.var <- sqrt(eigenvalues)*eigenvectors[,sign.comp]
+    
+    ggplot_screeplot <- function(eigenvalues, kaiser.rule.lim) {
+  p <- length(eigenvalues)
+  ggplot() + geom_hline(yintercept=kaiser.rule.lim, col="red") +
+    geom_point(aes(1:p,eigenvalues), col="blue", size=2.8)  +
+    geom_line(aes(1:p,eigenvalues), col="blue", size=0.8) + customtheme(tsize=12) + 
+    ggtitle("Scree Plot") + xlab("Component Number") + ylab("Eigenvalue")
+}
+
+ggplot_ind_fm <- function(eigenvalues, proj.ind, colind, indnames) {
+  d1.expl <- eigenvalues[1]/sum(eigenvalues)*100
+  d2.expl <- eigenvalues[2]/sum(eigenvalues)*100
+  xlab <- xlab(paste0("Dim 1 (", round(d1.expl, digits=2), "%)"))
+  ylab <- ylab(paste0("Dim 2 (", round(d2.expl, digits=2), "%)"))
+  ggplot() + geom_factormap_theme(xintercept=0, yintercept=0) + customtheme() +
+    geom_point(aes(x=proj.ind[,1], y=proj.ind[,2], col=factor(data$demo)), size=2) +
+    geom_text(aes(x=proj.ind[,1], y=proj.ind[,2], label=indnames), hjust=0, vjust=-0.5) +
+    ggtitle("Individuals factor map (PCA)") + labs(colour="Demo") + xlab + ylab
+}
+
+ggplot_var_fm <- function(eigenvalues, proj.var, varnames) {
+  d1.expl <- eigenvalues[1]/sum(eigenvalues)*100
+  d2.expl <- eigenvalues[2]/sum(eigenvalues)*100
+  xlab <- xlab(paste0("Dim 1 (", round(d1.expl, digits=2), "%)"))
+  ylab <- ylab(paste0("Dim 2 (", round(d2.expl, digits=2), "%)"))
+  ggplot() + geom_factormap_theme(xintercept=0, yintercept=0, circle=T) + customtheme() +
+    geom_segment(aes(x=0, y=0, xend=proj.var[,1], yend=proj.var[,2]), arrow=arrow(length=unit(0.3,"cm"))) +
+    geom_text(aes(x=proj.var[,1], y=proj.var[,2], label=varnames), hjust=0.5, vjust=-0.5) +
+    ggtitle("Variables factor map (PCA)") + xlab + ylab + coord_fixed(ratio=1)
+}
+customtheme <- function(tsize=12) {
+    return (theme_bw() + 
+              theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank(),
+                    axis.text.x=element_text(size=tsize), axis.text.y=element_text(size=tsize),
+                    axis.title.x=element_text(size=tsize), axis.title.y=element_text(size=tsize),
+                    plot.title=element_text(size=tsize+2, face="bold", hjust=0.5),
+                    legend.text=element_text(size=tsize)) +
+              theme(legend.position="bottom"))
+  }
+  
+  geom_circle <- function(center=c(0,0), rad=1, npoints=100){
+    c <- annotate("path",
+                  x=c(0)+rad*cos(seq(0,2*pi,length.out=100)),
+                  y=c(0)+rad*sin(seq(0,2*pi,length.out=100)))
+    return(c)
+  }
+  
+  geom_factormap_theme <- function(xintercept, yintercept, circle=FALSE) {
+    hline <- geom_hline(yintercept=0, linetype="dashed")
+    vline <- geom_vline(xintercept=0, linetype="dashed")
+    if (circle) {
+      circle <- geom_circle(center=c(0,0), rad=1, npoints=100)
+      return(c(hline, vline, circle))
+    } else {
+      return(c(hline, vline))
+    }
+  }
+
+    
+    if (graph) {
+        g1 <- ggplot_screeplot(eigenvalues, kaiser.rule.lim)
+        g2 <- ggplot_ind_fm(eigenvalues, proj.ind, factor(data$demo), indnames)
+        g3 <- ggplot_var_fm(eigenvalues, proj.var, varnames)
+        print(ggarrange(g1,g2,g3,ncol=3,widths=c(2,4,2.5)))
+    }
+    return(list(proj.ind=proj.ind, proj.var=proj.var, eigenvalues=eigenvalues,
+                eigenvectors=eigenvectors))
+}
+
+weights <- rep(1, n)
+pca.all.eucl <- custom_PCA(X, weights=weights, metric="eucl", graph=FALSE)
+pca.all.norm.eucl <- custom_PCA(X, weights=weights, metric="norm.eucl", graph=TRUE)
+```
+
+4. PCA with weights
+```{r}
+library(ggplot2)
+sapply(fd1, class)
+summary(pca1)
+biplot(pca1)
+pca1.eigenvalues <- pca1$eig[,c("eigenvalue")]
+g1 <- ggplot_screeplot(pca1.eigenvalues, mean(pca1.eigenvalues))
+g2 <- ggplot_ind_fm(pca1.eigenvalues, pca1$ind$coord, factor(fd1$demo), indnames)
+g3 <- ggplot_var_fm(pca1.eigenvalues, pca1$var$coord, varnames)
+ggarrange(g1,g2,g3,ncol=3,widths=c(2,4,2.5))
+```
+
